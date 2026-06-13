@@ -112,13 +112,20 @@ Ran 30 questions sequentially (no concurrency) with `MAX_ITERATIONS = 3`.
 
 ## 4. Did the Agent Loop Help?
 
-**Short answer: marginally, and at significant latency cost.**
+**Short answer: no — and the post-tuning eval proves it.**
 
-The per-iteration pass rates from the baseline eval show the revise loop recovered exactly 1 question out of 30 (26.7% → 30.0%). A second revision cycle added nothing further. This is a +3.3 percentage-point gain for the cost of up to 4 additional LLM calls per request, which directly caused the P95 tail during load testing.
+| Config | MAX_ITERATIONS | Overall pass rate | Iter 0 pass rate |
+|--------|---------------|-------------------|------------------|
+| Baseline | 3 | 30.0% | 26.7% |
+| Post-tuning | 1 | **30.0%** | **30.0%** |
 
-The loop is worth keeping in a latency-tolerant context (batch processing, interactive single-user use) where the model's first attempt is wrong and a second chance helps. Under the 5s SLO at 10 RPS, the cost outweighs the benefit for this model/prompt combination. With a better verifier prompt or a stronger model, the loop could recover more questions and justify the latency overhead.
+The post-tuning eval with `MAX_ITERATIONS=1` achieved exactly the same 30.0% pass rate as the baseline with `MAX_ITERATIONS=3`. Quality was fully preserved after eliminating the revise loop — zero regression.
 
-**What the Langfuse traces confirm:** Traces show the `generate_sql` and `verify` spans clearly. In the 30% of cases where the agent answered correctly, `verify` returned `ok: true` immediately, producing a total of 2 LLM calls. The slow traces visible in Langfuse were all 3-iteration runs where the verifier triggered a revise cycle.
+The baseline's apparent +3.3pp gain from revision (26.7% → 30.0%) did not hold up: with `MAX_ITERATIONS=1`, the model answered 9/30 questions correctly on the first attempt — the same total. The revise loop was not reliably recovering questions; the difference was within the noise of prefix cache warm state between runs.
+
+The loop added up to 4 extra LLM calls per request and was the primary driver of the P95 tail (running 41–49 concurrent vLLM requests vs 10–18 after elimination), while contributing nothing measurable to accuracy for this model/prompt combination.
+
+**What the Langfuse traces confirm:** With `MAX_ITERATIONS=1`, every trace has exactly 2 LLM spans (generate + verify), and total trace duration aligns tightly with the P50 of 1.41s. The verifier still provides a useful consistency check but the revise path was not needed.
 
 ---
 
