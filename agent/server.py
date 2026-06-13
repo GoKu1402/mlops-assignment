@@ -57,8 +57,12 @@ def health() -> dict[str, str]:
 @app.post("/answer", response_model=AnswerResponse)
 def answer(req: AnswerRequest) -> AnswerResponse:
     state = AgentState(question=req.question, db_id=req.db)
+    # Create a fresh handler per request — the shared module-level instance is not thread-safe
+    # under concurrent load with multiple uvicorn workers.
+    from langfuse.langchain import CallbackHandler as _LFHandler
+    handler = _LFHandler() if _lf_handler is not None else None
     config: dict[str, Any] = {
-        "callbacks": [_lf_handler] if _lf_handler is not None else [],
+        "callbacks": [handler] if handler is not None else [],
         "metadata": req.metadata,
     }
     try:
