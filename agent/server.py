@@ -23,8 +23,10 @@ from agent.graph import AgentState, graph  # noqa: E402
 # are NOT swallowed - a misconfigured Langfuse should not silently
 # produce zero traces.
 _lf_handler: Any = None
+_propagate_attributes: Any = None
 if os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_SECRET_KEY"):
     from langfuse.langchain import CallbackHandler
+    from langfuse import propagate_attributes as _propagate_attributes
     _lf_handler = CallbackHandler()
 
 
@@ -34,6 +36,7 @@ app = FastAPI()
 class AnswerRequest(BaseModel):
     question: str
     db: str
+    tags: list[str] = []
     metadata: dict[str, str] = {}
 
 
@@ -59,7 +62,11 @@ def answer(req: AnswerRequest) -> AnswerResponse:
         "metadata": req.metadata,
     }
     try:
-        final = graph.invoke(state, config=config)
+        if _propagate_attributes is not None and req.tags:
+            with _propagate_attributes(tags=req.tags):
+                final = graph.invoke(state, config=config)
+        else:
+            final = graph.invoke(state, config=config)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
 
